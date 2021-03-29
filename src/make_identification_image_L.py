@@ -170,8 +170,10 @@ def main():
                 print("dpiの値が不適切です")
                 continue
 
+            margin = 1.05
+            margin = 1.06
             output_image = spread_face(
-                row_img, detector, id_size_x, id_size_y, dpi)
+                row_img, detector, id_size_x, id_size_y, dpi, margin=margin)
 
             cv2.imwrite(output_file, output_image)
             print(output_file, "に出力しました")
