@@ -7,6 +7,10 @@ from detect_face_cascade import FaceDetectorCascade
 from detect_face_dlib import FaceDetectorDlib
 from utils import cvt_mm2inch, cvt_relative2absolute
 
+purposes = ["パスポート", "運転免許証", "履歴書"]
+methods = ["Dlib(Ensemble of Regression Trees)", "CascadeClassifer"]
+sizes = [[45, 35], [30, 24], [40, 30]]
+
 
 def spread_face(image, detector, id_size_x, id_size_y, dpi, margin=1.05):
     image_size_x = image.shape[1]
@@ -71,16 +75,89 @@ def spread_face(image, detector, id_size_x, id_size_y, dpi, margin=1.05):
     return output_image
 
 
+def bttn_apply_purpose(values, window, d):
+    if values["selected_purpose"]:
+        size = sizes[purposes.index(values["selected_purpose"])]
+        window["txt_size_y"].Update(str(size[0]))
+        window["txt_size_x"].Update(str(size[1]))
+    else:
+        print("目的を選んでから押してください")
+
+
+def bttn_detect_face(values, window, d):
+    if not all([values["image_file"], values["model"], values["txt_size_x"], values["txt_size_y"], values["expansion"]]):
+        print("空欄を入力してください")
+        return
+
+    row_img = cv2.imread(values["image_file"])
+
+    if row_img is None:
+        print("画像が読み込めません")
+        return
+
+    if values["model"] == methods[0]:
+        detector = FaceDetectorDlib(
+            expansion=float(values["expansion"])*1.5)
+    elif values["model"] == methods[1]:
+        detector = FaceDetectorCascade()
+    else:
+        print("model error")
+        return
+
+    id_size_x = int(values["txt_size_x"])
+    id_size_y = int(values["txt_size_y"])
+
+    if id_size_x <= 0 or id_size_y <= 0:
+        print("画像サイズの値が不適切です")
+        return
+
+    detector.detect_face(row_img)
+
+    detector.calc_range(row_img, id_size_y / id_size_x)
+
+    thumbnail = detector.draw_thumbnail(row_img, height_size=150)
+
+    imgbytes = cv2.imencode(".png", thumbnail)[1].tobytes()
+    window["image"].update(data=imgbytes)
+
+    d = {
+        "row_img": row_img,
+        "detector": detector,
+        "id_size_x": id_size_x,
+        "id_size_y": id_size_y
+    }
+    return d
+
+
+def bttn_output_image(values, window, d):
+    if not all([values["dpi"], values["output_file"]]):
+        print("空白を入力してください")
+        return
+    if "detector" not in d:
+        print("先に顔検出ボタンを押してください")
+
+    dpi = int(values["dpi"])
+    output_file = values["output_file"]
+
+    if dpi <= 0:
+        print("dpiの値が不適切です")
+        return
+
+    margin = 1.05
+    margin = 1.06
+    output_image = spread_face(
+        d["row_img"], d["detector"], d["id_size_x"], d["id_size_y"], dpi, margin=margin)
+
+    cv2.imwrite(output_file, output_image)
+    print(output_file, "に出力しました")
+
+
 def main():
     sg.theme('Light Gray 1')
 
-    purposes = ["パスポート", "運転免許証", "履歴書"]
-    methods = ["Dlib(Ensemble of Regression Trees)", "CascadeClassifer"]
-    sizes = [[45, 35], [30, 24], [40, 30]]
     layout = [
         [sg.Image(filename='', key='image', size=(10, 10))],
         [sg.Frame("正面から撮った写真ファイルと出力先を入力", [
-            # [sg.Text('正面から撮った写真ファイルと出力先を入力')],
             [sg.Text('入力画像'), sg.InputText(key="image_file",
                                            size=(52, 5)), sg.FileBrowse("参照")],
             [sg.Text("出力画像"), sg.InputText("./output.jpg",
@@ -88,7 +165,6 @@ def main():
         ]
         )],
         [sg.Frame("使用目的を選択するか画像サイズを直接入力", [
-            # [sg.Text('使用目的を選択するか画像サイズを直接入力')],
             [sg.Text("使用目的"), sg.Combo(purposes, default_value=purposes[2], key="selected_purpose", size=(
                 46, 5)), sg.Button("適用", key="bttn_apply_purpose")],
             [sg.Text("画像サイズ（縦x横[mm]）"), sg.InputText("40", size=(15, 5), key="txt_size_y"), sg.Text(
@@ -102,10 +178,18 @@ def main():
             [sg.Text("拡大率(Dlibのみ)"), sg.Slider(range=(
                 0.75, 1.5), default_value=1, key="expansion", orientation="h", resolution=0.05)]
         ])],
-        [sg.Output(size=(64, 4), key="output")],
-        [sg.Submit(button_text='顔検出', key="detect_face"),
-         sg.Submit(button_text="画像作成", key="output_image")]
+        # [sg.Output(size=(64, 4), key="output")],
+        [sg.Button(button_text='顔検出', key="bttn_detect_face"),
+         sg.Button(button_text="画像作成", key="bttn_output_image")]
     ]
+
+    handler = {
+        "bttn_detect_face": bttn_detect_face,
+        "bttn_output_image": bttn_output_image,
+        "bttn_apply_purpose": bttn_apply_purpose,
+    }
+
+    d = {}
 
     window = sg.Window('test', layout)
     while True:
@@ -115,68 +199,11 @@ def main():
             print('exit')
             break
 
-        if event == "bttn_apply_purpose":
-            if values["selected_purpose"]:
-                size = sizes[purposes.index(values["selected_purpose"])]
-                window["txt_size_y"].Update(str(size[0]))
-                window["txt_size_x"].Update(str(size[1]))
-            else:
-                print("目的を選んでから押してください")
+        event_func = handler[event]
+        d2 = event_func(values, window, d)
+        if d2 is not None:
+            d.update(d2)
 
-        if event == "detect_face":
-            if not all([values["image_file"], values["model"], values["txt_size_x"], values["txt_size_y"], values["expansion"]]):
-                print("空欄を入力してください")
-                continue
-
-            row_img = cv2.imread(values["image_file"])
-
-            if row_img is None:
-                print("画像が読み込めません")
-                continue
-
-            if values["model"] == methods[0]:
-                detector = FaceDetectorDlib(
-                    expansion=float(values["expansion"])*1.5)
-            elif values["model"] == methods[1]:
-                detector = FaceDetectorCascade()
-            else:
-                print("model error")
-                continue
-
-            id_size_x = int(values["txt_size_x"])
-            id_size_y = int(values["txt_size_y"])
-
-            if id_size_x <= 0 or id_size_y <= 0:
-                print("画像サイズの値が不適切です")
-                continue
-
-            detector.detect_face(row_img)
-
-            detector.calc_range(row_img, id_size_y / id_size_x)
-
-            thumbnail = detector.draw_thumbnail(row_img, height_size=150)
-
-            imgbytes = cv2.imencode(".png", thumbnail)[1].tobytes()
-            window["image"].update(data=imgbytes)
-
-        if event == "output_image":
-            if not all([values["dpi"], values["output_file"]]):
-                print("空白を入力してください")
-                continue
-            dpi = int(values["dpi"])
-            output_file = values["output_file"]
-
-            if dpi <= 0:
-                print("dpiの値が不適切です")
-                continue
-
-            margin = 1.05
-            margin = 1.06
-            output_image = spread_face(
-                row_img, detector, id_size_x, id_size_y, dpi, margin=margin)
-
-            cv2.imwrite(output_file, output_image)
-            print(output_file, "に出力しました")
     window.close()
 
 
